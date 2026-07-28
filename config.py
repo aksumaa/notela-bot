@@ -1,40 +1,91 @@
 """
-Loads configuration from environment variables (.env file).
-Never hardcode secrets here — everything comes from the environment.
+Configuration module for Notela AI Telegram Bot.
+Loads and validates environment variables with proper error handling.
 """
+
 import os
-import sys
 import logging
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
 
-logger = logging.getLogger(__name__)
-
-BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
-OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-
-# Optional overrides with sane defaults
-OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///notela.db")
-
-# Max characters of a document we send to GPT in one call.
-# Keeps prompt cost/size sane for the MVP — no chunking/RAG yet.
-MAX_DOCUMENT_CHARS: int = int(os.getenv("MAX_DOCUMENT_CHARS", "12000"))
+# Load .env file
+ENV_FILE = Path(__file__).parent / ".env"
+load_dotenv(ENV_FILE)
 
 
-def validate_config() -> None:
-    """Fail fast and loud if required secrets are missing."""
-    missing = []
-    if not BOT_TOKEN:
-        missing.append("BOT_TOKEN")
-    if not OPENAI_API_KEY:
-        missing.append("OPENAI_API_KEY")
+class ConfigError(Exception):
+    """Configuration validation error."""
+    pass
 
-    if missing:
-        logger.error("Missing required environment variables: %s", ", ".join(missing))
-        print(
-            f"ERROR: Missing required environment variables: {', '.join(missing)}\n"
-            f"Copy .env.example to .env and fill in the values."
+
+class Config:
+    """Application configuration with validation."""
+
+    # Telegram Bot
+    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+
+    # Gemini API
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
+
+    # Application
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
+
+    # Directories
+    LOG_DIR: Path = Path(__file__).parent / "logs"
+    DATABASE_DIR: Path = Path(__file__).parent / "storage"
+
+    @classmethod
+    def validate(cls) -> None:
+        """Validate all required configuration."""
+        errors = []
+
+        if not cls.TELEGRAM_BOT_TOKEN:
+            errors.append("TELEGRAM_BOT_TOKEN is required in .env")
+
+        if not cls.GEMINI_API_KEY:
+            errors.append("GEMINI_API_KEY is required in .env")
+
+        if cls.LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            errors.append(f"Invalid LOG_LEVEL: {cls.LOG_LEVEL}")
+
+        if errors:
+            error_msg = "\n".join(errors)
+            raise ConfigError(f"Configuration validation failed:\n{error_msg}")
+
+    @classmethod
+    def setup_logging(cls) -> logging.Logger:
+        """Configure logging with file and console handlers."""
+        cls.LOG_DIR.mkdir(exist_ok=True, parents=True)
+
+        logger = logging.getLogger("notela")
+        logger.setLevel(cls.LOG_LEVEL)
+
+        # Prevent duplicate handlers
+        if logger.handlers:
+            return logger
+
+        # Formatter
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-        sys.exit(1)
+
+        # Console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+        # File handler
+        log_file = cls.LOG_DIR / "notela_bot.log"
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+        return logger
+
+
+def get_logger(name: str) -> logging.Logger:
+    """Get logger instance."""
+    return logging.getLogger(f"notela.{name}")

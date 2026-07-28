@@ -1,0 +1,4 @@
+"""Notela AI - Telegram Bot Application."""
+
+__version__ = "1.0.0"
+__author__ = "Notela Team"
